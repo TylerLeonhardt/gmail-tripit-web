@@ -1,5 +1,7 @@
 # gmail-tripit-web
 
+[![CI](https://github.com/TylerLeonhardt/gmail-tripit-web/actions/workflows/ci.yml/badge.svg)](https://github.com/TylerLeonhardt/gmail-tripit-web/actions/workflows/ci.yml)
+
 **A web application for manual review and classification of potential flight confirmation emails.**
 
 This system presents candidate emails one at a time in a card-based, Tinder-style interface where users can swipe right (or click "Yes") for flight confirmations and swipe left (or click "No") for non-flight emails.
