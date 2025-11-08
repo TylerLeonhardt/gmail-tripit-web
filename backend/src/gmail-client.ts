@@ -88,8 +88,15 @@ export class GmailClient {
     // Generate preview text from plain text or HTML
     let previewText = plainText.slice(0, 200);
     if (!previewText && htmlContent) {
-      // Strip HTML tags for preview
-      previewText = htmlContent.replace(/<[^>]*>/g, '').slice(0, 200);
+      // For preview text, we just need a simple text representation
+      // The actual HTML is safely rendered in a sandboxed iframe on the frontend
+      // This is NOT for sanitizing HTML for rendering
+      previewText = htmlContent
+        .split('<').join(' ') // Replace all < with space to break any tags
+        .split('>').join(' ') // Replace all > with space
+        .replace(/\s+/g, ' ') // Collapse multiple spaces
+        .trim()
+        .slice(0, 200);
     }
 
     return {
