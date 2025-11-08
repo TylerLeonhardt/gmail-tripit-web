@@ -1,55 +1,55 @@
 # Flight Email Classifier Web App: Tinder-Style Review Interface
 
-**A web application for manual review and classification of potential flight confirmation emails.** This system presents candidate emails one at a time in a card-based interface where you swipe right (or click "Yes") for flight confirmations and swipe left (or click "No") for non-flight emails. The architecture uses a Python backend with relaxed classification thresholds (30-40% confidence instead of 50%+) to maximize recall, letting you make the final classification decision through an intuitive review process.
+**A web application for manual review and classification of potential flight confirmation emails.** This system presents candidate emails one at a time in a card-based interface where you swipe right (or click "Yes") for flight confirmations and swipe left (or click "No") for non-flight emails. The architecture uses a Node.js + TypeScript backend with relaxed classification thresholds (30-40% confidence instead of 50%+) to maximize recall, letting you make the final classification decision through an intuitive review process.
 
-The technical approach combines Gmail API for email retrieval, a lightweight Python web framework (Flask or FastAPI) for the backend, a React or vanilla JavaScript frontend with card-swiping UI, and SQLite for tracking review decisions. This design prioritizes user experience—quick load times, keyboard shortcuts, email preview with highlighting, and progress tracking—while ensuring no confirmation emails are missed through conservative initial filtering.
+The technical approach combines Gmail API for email retrieval, Express.js with TypeScript for the backend, a React or vanilla JavaScript frontend with card-swiping UI, and SQLite for tracking review decisions. This design prioritizes user experience—quick load times, keyboard shortcuts, email preview with highlighting, and progress tracking—while ensuring no confirmation emails are missed through conservative initial filtering.
 
 ## Architecture overview: Backend, frontend, and data flow
 
-**Use FastAPI for the backend with async support and automatic API documentation.** FastAPI provides excellent performance, built-in validation with Pydantic, automatic OpenAPI documentation, and WebSocket support for real-time updates. Install with `pip install fastapi uvicorn[standard] python-multipart`:
+**Use Express.js with TypeScript for the backend with async support and type safety.** Express.js provides excellent performance, extensive middleware ecosystem, and TypeScript adds compile-time type checking. Install with `npm install express cors` and dev dependencies `npm install -D typescript @types/node @types/express @types/cors ts-node nodemon`:
 
-```python
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional, List
-import uvicorn
+```typescript
+import express, { Request, Response } from 'express';
+import cors from 'cors';
 
-app = FastAPI(title="Flight Email Classifier", version="1.0.0")
+const app = express();
+const PORT = process.env.PORT || 8000;
 
-# Enable CORS for frontend development
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+// Enable CORS for frontend development
+app.use(cors({
+  origin: ['http://localhost:3000', 'http://localhost:5173'],
+  credentials: true
+}));
 
-class EmailCard(BaseModel):
-    id: str
-    subject: str
-    from_email: str
-    date: str
-    preview_text: str
-    html_content: Optional[str]
-    confidence_score: int
-    highlights: List[str] = []
+app.use(express.json());
 
-class ReviewDecision(BaseModel):
-    email_id: str
-    is_flight_confirmation: bool
-    notes: Optional[str] = None
+interface EmailCard {
+  id: string;
+  subject: string;
+  from_email: string;
+  date: string;
+  preview_text: string;
+  html_content?: string;
+  confidence_score: number;
+  highlights: string[];
+}
 
-@app.get("/")
-def read_root():
-    return {"message": "Flight Email Classifier API"}
+interface ReviewDecision {
+  email_id: string;
+  is_flight_confirmation: boolean;
+  notes?: string;
+}
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+app.get('/', (req: Request, res: Response) => {
+  res.json({ message: 'Flight Email Classifier API' });
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
 ```
 
-Alternative: Flask with `pip install flask flask-cors` for simpler setup if you don't need async features. FastAPI's automatic `/docs` endpoint provides interactive API testing without additional tools.
+Alternative: Use Fastify for even better performance, or NestJS for a more opinionated framework with built-in TypeScript support and dependency injection. Express provides the most straightforward setup with wide community support.
 
 **Design a card-based frontend with React and react-tinder-card library.** This provides smooth swipe animations and touch support. Install with `npm create vite@latest frontend -- --template react` then `npm install react-tinder-card`:
 
@@ -204,120 +204,197 @@ This schema separates concerns: candidates for review, user decisions, and confi
 
 **Lower the confidence threshold to 30-40% to maximize recall over precision.** Since you're manually reviewing everything, false positives are acceptable—missing true flight confirmations is not. Adjust the multi-layer classifier scoring:
 
-```python
-def calculate_confidence_score(email_data):
-    score = 0
-    reasons = []
-    
-    # Schema.org FlightReservation (highest confidence)
-    if has_flight_reservation_schema(email_data['html']):
-        score += 50
-        reasons.append("Has FlightReservation schema markup")
-    
-    # Airline/OTA sender domain
-    known_senders = [
-        'united.com', 'delta.com', 'aa.com', 'southwest.com',
-        'jetblue.com', 'expedia.com', 'kayak.com', 'priceline.com'
-    ]
-    if any(domain in email_data['from_email'].lower() for domain in known_senders):
-        score += 20
-        reasons.append(f"Known airline/OTA sender")
-    
-    # Subject line patterns (relaxed)
-    confirmation_keywords = ['confirmation', 'confirmed', 'itinerary', 'booking']
-    if any(kw in email_data['subject'].lower() for kw in confirmation_keywords):
-        score += 15
-        reasons.append("Confirmation keyword in subject")
-    
-    # Flight-related keywords in subject
-    flight_keywords = ['flight', 'airline', 'boarding', 'departure']
-    if any(kw in email_data['subject'].lower() for kw in flight_keywords):
-        score += 10
-        reasons.append("Flight keyword in subject")
-    
-    # Content markers (any 2+ markers)
-    text = email_data.get('plain_text', '')
-    markers_found = []
-    if re.search(r'\b[A-Z0-9]{6}\b', text):
-        markers_found.append("confirmation code")
-    if re.search(r'\b[A-Z]{2}\d{1,4}\b', text):
-        markers_found.append("flight number")
-    if re.search(r'\b[A-Z]{3}\b', text):
-        markers_found.append("airport code")
-    
-    if len(markers_found) >= 2:
-        score += 10
-        reasons.append(f"Flight markers: {', '.join(markers_found)}")
-    
-    return score, reasons
+```typescript
+interface EmailData {
+  html: string;
+  from_email: string;
+  subject: string;
+  plain_text?: string;
+}
 
-# Classify as candidate if score >= 30 (was 50+ in original spec)
-def is_candidate_for_review(email_data):
-    score, reasons = calculate_confidence_score(email_data)
-    return score >= 30, score, reasons
+interface ConfidenceResult {
+  score: number;
+  reasons: string[];
+}
+
+function hasFlightReservationSchema(html: string): boolean {
+  // Check for Schema.org FlightReservation markup
+  return html.includes('FlightReservation') || html.includes('schema.org/FlightReservation');
+}
+
+function calculateConfidenceScore(emailData: EmailData): ConfidenceResult {
+  let score = 0;
+  const reasons: string[] = [];
+  
+  // Schema.org FlightReservation (highest confidence)
+  if (hasFlightReservationSchema(emailData.html)) {
+    score += 50;
+    reasons.push("Has FlightReservation schema markup");
+  }
+  
+  // Airline/OTA sender domain
+  const knownSenders = [
+    'united.com', 'delta.com', 'aa.com', 'southwest.com',
+    'jetblue.com', 'expedia.com', 'kayak.com', 'priceline.com'
+  ];
+  if (knownSenders.some(domain => emailData.from_email.toLowerCase().includes(domain))) {
+    score += 20;
+    reasons.push("Known airline/OTA sender");
+  }
+  
+  // Subject line patterns (relaxed)
+  const confirmationKeywords = ['confirmation', 'confirmed', 'itinerary', 'booking'];
+  if (confirmationKeywords.some(kw => emailData.subject.toLowerCase().includes(kw))) {
+    score += 15;
+    reasons.push("Confirmation keyword in subject");
+  }
+  
+  // Flight-related keywords in subject
+  const flightKeywords = ['flight', 'airline', 'boarding', 'departure'];
+  if (flightKeywords.some(kw => emailData.subject.toLowerCase().includes(kw))) {
+    score += 10;
+    reasons.push("Flight keyword in subject");
+  }
+  
+  // Content markers (any 2+ markers)
+  const text = emailData.plain_text || '';
+  const markersFound: string[] = [];
+  
+  if (/\b[A-Z0-9]{6}\b/.test(text)) {
+    markersFound.push("confirmation code");
+  }
+  if (/\b[A-Z]{2}\d{1,4}\b/.test(text)) {
+    markersFound.push("flight number");
+  }
+  if (/\b[A-Z]{3}\b/.test(text)) {
+    markersFound.push("airport code");
+  }
+  
+  if (markersFound.length >= 2) {
+    score += 10;
+    reasons.push(`Flight markers: ${markersFound.join(', ')}`);
+  }
+  
+  return { score, reasons };
+}
+
+// Classify as candidate if score >= 30 (was 50+ in original spec)
+function isCandidateForReview(emailData: EmailData): { isCandidate: boolean; score: number; reasons: string[] } {
+  const { score, reasons } = calculateConfidenceScore(emailData);
+  return { isCandidate: score >= 30, score, reasons };
+}
 ```
 
 This relaxed threshold catches more potential emails at the cost of increased review volume. A 20-year email history with 5,000 true flight confirmations might yield 6,000-8,000 candidates (20-60% false positive rate), but ensures minimal missed flights.
 
 **Optimize the Gmail search query for breadth rather than precision.** Use an expansive search that prioritizes recall:
 
-```python
-# Relaxed search query
-query = '''
-    (flight OR airline OR boarding OR departure OR arrival OR itinerary OR confirmation)
-    OR from:(united.com OR delta.com OR aa.com OR southwest.com OR jetblue.com OR 
-             expedia.com OR kayak.com OR priceline.com OR booking.com)
-    after:2000/01/01
-'''
+```typescript
+// Relaxed search query
+const query = `
+  (flight OR airline OR boarding OR departure OR arrival OR itinerary OR confirmation)
+  OR from:(united.com OR delta.com OR aa.com OR southwest.com OR jetblue.com OR 
+           expedia.com OR kayak.com OR priceline.com OR booking.com)
+  after:2000/01/01
+`;
 ```
 
 This casts a wider net, accepting that the manual review step filters out false positives. You can further expand by adding more airline domains or travel-related keywords.
 
 **Pre-fetch and cache email content during initial scan phase.** Run a background job that searches Gmail, scores candidates, and stores full HTML/text content in the database:
 
-```python
-import asyncio
-from googleapiclient.discovery import build
+```typescript
+import { google } from 'googleapis';
+import { DatabaseManager } from './database';
 
-class EmailFetcher:
-    def __init__(self, gmail_service, db_manager):
-        self.service = gmail_service
-        self.db = db_manager
+interface EmailCandidate {
+  message_id: string;
+  gmail_uid: string;
+  subject: string;
+  from_email: string;
+  msg_date: string;
+  html_content: string;
+  plain_text: string;
+  confidence_score: number;
+  detection_reasons: string;
+}
+
+class EmailFetcher {
+  private gmail: any;
+  private db: DatabaseManager;
+
+  constructor(gmailClient: any, dbManager: DatabaseManager) {
+    this.gmail = gmailClient;
+    this.db = dbManager;
+  }
+
+  async fetchAndScoreCandidates(query: string): Promise<number> {
+    const messages = await this.listMessagesWithPagination(query);
     
-    async def fetch_and_score_candidates(self, query):
-        messages = self.list_messages_with_pagination(query)
-        
-        candidates = []
-        for msg in messages:
-            # Fetch full message content
-            full_msg = self.service.users().messages().get(
-                userId='me',
-                id=msg['id'],
-                format='full'
-            ).execute()
-            
-            email_data = self.extract_email_data(full_msg)
-            is_candidate, score, reasons = is_candidate_for_review(email_data)
-            
-            if is_candidate:
-                candidates.append({
-                    'message_id': email_data['message_id'],
-                    'gmail_uid': msg['id'],
-                    'subject': email_data['subject'],
-                    'from_email': email_data['from'],
-                    'msg_date': email_data['date'],
-                    'html_content': email_data['html'],
-                    'plain_text': email_data['text'],
-                    'confidence_score': score,
-                    'detection_reasons': json.dumps(reasons)
-                })
-            
-            # Rate limiting
-            await asyncio.sleep(0.1)
-        
-        # Bulk insert into database
-        self.db.insert_candidates(candidates)
-        return len(candidates)
+    const candidates: EmailCandidate[] = [];
+    
+    for (const msg of messages) {
+      // Fetch full message content
+      const fullMsg = await this.gmail.users.messages.get({
+        userId: 'me',
+        id: msg.id,
+        format: 'full'
+      });
+      
+      const emailData = this.extractEmailData(fullMsg.data);
+      const { isCandidate, score, reasons } = isCandidateForReview(emailData);
+      
+      if (isCandidate) {
+        candidates.push({
+          message_id: emailData.message_id,
+          gmail_uid: msg.id,
+          subject: emailData.subject,
+          from_email: emailData.from_email,
+          msg_date: emailData.date,
+          html_content: emailData.html,
+          plain_text: emailData.plain_text,
+          confidence_score: score,
+          detection_reasons: JSON.stringify(reasons)
+        });
+      }
+      
+      // Rate limiting
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    // Bulk insert into database
+    await this.db.insertCandidates(candidates);
+    return candidates.length;
+  }
+
+  private async listMessagesWithPagination(query: string): Promise<any[]> {
+    const messages: any[] = [];
+    let pageToken: string | undefined;
+    
+    do {
+      const response = await this.gmail.users.messages.list({
+        userId: 'me',
+        q: query,
+        maxResults: 500,
+        pageToken
+      });
+      
+      if (response.data.messages) {
+        messages.push(...response.data.messages);
+      }
+      
+      pageToken = response.data.nextPageToken;
+    } while (pageToken);
+    
+    return messages;
+  }
+
+  private extractEmailData(message: any): EmailData & { message_id: string; date: string } {
+    // Extract headers, body parts, etc.
+    // Implementation details omitted for brevity
+    return {} as any;
+  }
+}
 ```
 
 This one-time fetch operation runs before you start reviewing, ensuring fast load times in the web interface. For 20 years of email, expect 30-60 minutes for the initial scan with rate limiting.
@@ -326,145 +403,201 @@ This one-time fetch operation runs before you start reviewing, ensuring fast loa
 
 **Implement REST endpoints for fetching candidates and submitting decisions:**
 
-```python
-from fastapi import FastAPI, HTTPException, Query
-from typing import Optional, List
-import json
+```typescript
+import express, { Request, Response } from 'express';
+import { DatabaseManager } from './database';
 
-@app.get("/api/emails/next-batch")
-async def get_next_batch(batch_size: int = Query(20, ge=1, le=100)):
-    """Fetch next batch of unreviewed email candidates."""
-    candidates = db.get_unreviewed_candidates(limit=batch_size)
-    
-    if not candidates:
-        return {"emails": [], "message": "No more emails to review"}
-    
-    emails = []
-    for c in candidates:
-        emails.append({
-            "id": c['message_id'],
-            "subject": c['subject'],
-            "from_email": c['from_email'],
-            "date": c['msg_date'],
-            "preview_text": c['preview_text'],
-            "html_content": c['html_content'],
-            "confidence_score": c['confidence_score'],
-            "highlights": json.loads(c['detection_reasons'])
-        })
-    
-    return {"emails": emails, "total_remaining": db.count_unreviewed()}
+const router = express.Router();
+const db = new DatabaseManager('./data/emails.db');
 
-@app.post("/api/emails/review")
-async def submit_review(decision: ReviewDecision):
-    """Record user's classification decision."""
-    # Find candidate
-    candidate = db.get_candidate_by_message_id(decision.email_id)
-    if not candidate:
-        raise HTTPException(status_code=404, detail="Email not found")
-    
-    # Record decision
-    db.insert_review_decision(
-        email_candidate_id=candidate['id'],
-        message_id=decision.email_id,
-        is_flight_confirmation=decision.is_flight_confirmation,
-        notes=decision.notes
-    )
-    
-    # Mark as reviewed
-    db.mark_as_reviewed(candidate['id'])
-    
-    # If confirmed flight, add to processing queue
-    if decision.is_flight_confirmation:
-        db.insert_confirmed_flight(
-            message_id=decision.email_id,
-            gmail_uid=candidate['gmail_uid'],
-            subject=candidate['subject']
-        )
-    
-    return {"status": "success", "remaining": db.count_unreviewed()}
+interface ReviewDecisionBody {
+  email_id: string;
+  is_flight_confirmation: boolean;
+  notes?: string;
+}
 
-@app.get("/api/stats")
-async def get_stats():
-    """Get review progress statistics."""
-    return {
-        "total_candidates": db.count_total_candidates(),
-        "reviewed": db.count_reviewed(),
-        "unreviewed": db.count_unreviewed(),
-        "confirmed_flights": db.count_confirmed_flights(),
-        "rejected": db.count_rejected(),
-        "review_rate": db.calculate_review_rate()  # emails/minute
+router.get('/api/emails/next-batch', async (req: Request, res: Response) => {
+  try {
+    const batchSize = Math.min(parseInt(req.query.batch_size as string) || 20, 100);
+    
+    const candidates = await db.getUnreviewedCandidates(batchSize);
+    
+    if (candidates.length === 0) {
+      return res.json({ emails: [], message: 'No more emails to review' });
     }
-
-@app.post("/api/emails/undo")
-async def undo_last_review():
-    """Undo the most recent review decision."""
-    last_decision = db.get_last_decision()
-    if not last_decision:
-        raise HTTPException(status_code=404, detail="No decisions to undo")
     
-    db.delete_decision(last_decision['id'])
-    db.mark_as_unreviewed(last_decision['email_candidate_id'])
+    const emails = candidates.map(c => ({
+      id: c.message_id,
+      subject: c.subject,
+      from_email: c.from_email,
+      date: c.msg_date,
+      preview_text: c.preview_text,
+      html_content: c.html_content,
+      confidence_score: c.confidence_score,
+      highlights: JSON.parse(c.detection_reasons)
+    }));
     
-    return {"status": "success", "undone_email_id": last_decision['message_id']}
+    const totalRemaining = await db.countUnreviewed();
+    
+    res.json({ emails, total_remaining: totalRemaining });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch candidates' });
+  }
+});
 
-@app.get("/api/emails/search")
-async def search_candidates(q: str, reviewed: Optional[bool] = None):
-    """Search candidates by subject, sender, or content."""
-    results = db.search_candidates(query=q, reviewed_filter=reviewed)
-    return {"results": results, "count": len(results)}
+router.post('/api/emails/review', async (req: Request, res: Response) => {
+  try {
+    const decision: ReviewDecisionBody = req.body;
+    
+    // Find candidate
+    const candidate = await db.getCandidateByMessageId(decision.email_id);
+    if (!candidate) {
+      return res.status(404).json({ error: 'Email not found' });
+    }
+    
+    // Record decision
+    await db.insertReviewDecision(
+      candidate.id,
+      decision.email_id,
+      decision.is_flight_confirmation,
+      decision.notes
+    );
+    
+    // Mark as reviewed
+    await db.markAsReviewed(candidate.id);
+    
+    // If confirmed flight, add to processing queue
+    if (decision.is_flight_confirmation) {
+      await db.insertConfirmedFlight(
+        decision.email_id,
+        candidate.gmail_uid,
+        candidate.subject
+      );
+    }
+    
+    const remaining = await db.countUnreviewed();
+    
+    res.json({ status: 'success', remaining });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to submit review' });
+  }
+});
+
+router.get('/api/stats', async (req: Request, res: Response) => {
+  try {
+    const stats = {
+      total_candidates: await db.countTotalCandidates(),
+      reviewed: await db.countReviewed(),
+      unreviewed: await db.countUnreviewed(),
+      confirmed_flights: await db.countConfirmedFlights(),
+      rejected: await db.countRejected(),
+      review_rate: await db.calculateReviewRate()
+    };
+    
+    res.json(stats);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch stats' });
+  }
+});
+
+router.post('/api/emails/undo', async (req: Request, res: Response) => {
+  try {
+    const lastDecision = await db.getLastDecision();
+    if (!lastDecision) {
+      return res.status(404).json({ error: 'No decisions to undo' });
+    }
+    
+    await db.deleteDecision(lastDecision.id);
+    await db.markAsUnreviewed(lastDecision.email_candidate_id);
+    
+    res.json({ status: 'success', undone_email_id: lastDecision.message_id });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to undo review' });
+  }
+});
+
+router.get('/api/emails/search', async (req: Request, res: Response) => {
+  try {
+    const query = req.query.q as string;
+    const reviewed = req.query.reviewed as string | undefined;
+    
+    const reviewedFilter = reviewed === 'true' ? true : reviewed === 'false' ? false : undefined;
+    
+    const results = await db.searchCandidates(query, reviewedFilter);
+    
+    res.json({ results, count: results.length });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to search candidates' });
+  }
+});
+
+export default router;
 ```
 
 These endpoints provide the complete CRUD operations needed for the review workflow. The `/next-batch` endpoint returns multiple emails at once for pre-loading, improving perceived performance.
 
 **Add WebSocket support for real-time progress updates:**
 
-```python
-from fastapi import WebSocket, WebSocketDisconnect
-from typing import List
+```typescript
+import { WebSocketServer, WebSocket } from 'ws';
+import { Server } from 'http';
 
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-    
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-    
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-    
-    async def broadcast(self, message: dict):
-        for connection in self.active_connections:
-            await connection.send_json(message)
+class ConnectionManager {
+  private connections: Set<WebSocket> = new Set();
 
-manager = ConnectionManager()
+  connect(ws: WebSocket): void {
+    this.connections.add(ws);
+  }
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        while True:
-            # Keep connection alive
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
+  disconnect(ws: WebSocket): void {
+    this.connections.delete(ws);
+  }
 
-# Broadcast updates after each review
-@app.post("/api/emails/review")
-async def submit_review(decision: ReviewDecision):
-    # ... existing code ...
+  broadcast(message: any): void {
+    const data = JSON.stringify(message);
+    for (const connection of this.connections) {
+      if (connection.readyState === WebSocket.OPEN) {
+        connection.send(data);
+      }
+    }
+  }
+}
+
+const manager = new ConnectionManager();
+
+export function setupWebSocket(server: Server): void {
+  const wss = new WebSocketServer({ server, path: '/ws' });
+
+  wss.on('connection', (ws: WebSocket) => {
+    manager.connect(ws);
     
-    # Broadcast progress update
-    await manager.broadcast({
-        "type": "progress_update",
-        "reviewed": db.count_reviewed(),
-        "remaining": db.count_unreviewed()
-    })
+    ws.on('close', () => {
+      manager.disconnect(ws);
+    });
     
-    return {"status": "success"}
+    ws.on('error', (error) => {
+      console.error('WebSocket error:', error);
+      manager.disconnect(ws);
+    });
+  });
+}
+
+// In your review endpoint, broadcast updates
+router.post('/api/emails/review', async (req: Request, res: Response) => {
+  // ... existing code ...
+  
+  // Broadcast progress update
+  manager.broadcast({
+    type: 'progress_update',
+    reviewed: await db.countReviewed(),
+    remaining: await db.countUnreviewed()
+  });
+  
+  res.json({ status: 'success' });
+});
 ```
 
-WebSocket updates enable showing live progress if multiple users review simultaneously or if you have the app open on multiple devices.
+WebSocket updates enable showing live progress if multiple users review simultaneously or if you have the app open on multiple devices. Install with `npm install ws` and types with `npm install -D @types/ws`.
 
 ## Frontend UI: Card interface and user experience
 
@@ -809,30 +942,35 @@ This design emphasizes speed and clarity—large buttons, keyboard shortcuts pro
 ```
 gmail-flight-reviewer/
 ├── README.md
-├── requirements.txt
 ├── package.json
+├── tsconfig.json
 ├── .env.example
 ├── backend/
-│   ├── main.py
-│   ├── database.py
-│   ├── gmail_client.py
-│   ├── classifier.py
-│   └── models.py
+│   ├── src/
+│   │   ├── server.ts
+│   │   ├── database.ts
+│   │   ├── gmail-client.ts
+│   │   ├── classifier.ts
+│   │   ├── routes.ts
+│   │   └── types.ts
+│   ├── package.json
+│   └── tsconfig.json
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx
+│   │   ├── App.tsx
 │   │   ├── App.css
 │   │   ├── components/
-│   │   │   ├── EmailCard.jsx
-│   │   │   ├── Controls.jsx
-│   │   │   └── Stats.jsx
+│   │   │   ├── EmailCard.tsx
+│   │   │   ├── Controls.tsx
+│   │   │   └── Stats.tsx
 │   │   └── api/
-│   │       └── client.js
+│   │       └── client.ts
 │   ├── index.html
-│   └── vite.config.js
+│   ├── package.json
+│   └── vite.config.ts
 ├── config/
 │   ├── credentials.json
-│   └── settings.py
+│   └── settings.ts
 └── data/
     └── emails.db
 ```
@@ -841,15 +979,17 @@ gmail-flight-reviewer/
 
 ```bash
 # Backend setup
-cd gmail-flight-reviewer
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install fastapi uvicorn[standard] google-api-python-client google-auth-oauthlib
-pip install beautifulsoup4 lxml sqlalchemy python-multipart
+cd gmail-flight-reviewer/backend
+npm init -y
+npm install express cors ws googleapis better-sqlite3
+npm install -D typescript @types/node @types/express @types/cors @types/ws ts-node nodemon
+
+# Create tsconfig.json
+npx tsc --init
 
 # Frontend setup
-cd frontend
-npm create vite@latest . -- --template react
+cd ../frontend
+npm create vite@latest . -- --template react-ts
 npm install react-tinder-card axios
 npm install
 
@@ -865,7 +1005,7 @@ npm install
 1. **Initial scan phase** (30-60 minutes for 20 years): Run the fetcher script to search Gmail, score candidates, and populate the database:
 
 ```bash
-python backend/fetch_candidates.py --query "flight OR airline" --after "2000/01/01"
+npm run fetch-candidates -- --query "flight OR airline" --after "2000/01/01"
 ```
 
 2. **Start the web application**:
@@ -873,7 +1013,7 @@ python backend/fetch_candidates.py --query "flight OR airline" --after "2000/01/
 ```bash
 # Terminal 1: Backend
 cd backend
-uvicorn main:app --reload --port 8000
+npm run dev
 
 # Terminal 2: Frontend
 cd frontend
@@ -885,109 +1025,215 @@ npm run dev
 4. **Export confirmed flights**: After completing reviews, export the confirmed list:
 
 ```bash
-python backend/export_confirmed.py --output confirmed_flights.json
+npm run export-confirmed -- --output confirmed_flights.json
 ```
 
 5. **Bulk forward to TripIt** (2-3 days due to Gmail limits): Use the original forwarding script with the confirmed list:
 
 ```bash
-python backend/forward_to_tripit.py --batch-size 100 --delay 60
+npm run forward-to-tripit -- --batch-size 100 --delay 60
 ```
 
 **Backend database manager with helper methods:**
 
-```python
-import sqlite3
-from contextlib import contextmanager
-from typing import List, Optional, Dict
+```typescript
+import Database from 'better-sqlite3';
 
-class DatabaseManager:
-    def __init__(self, db_path: str):
-        self.db_path = db_path
-        self._init_database()
-    
-    @contextmanager
-    def get_connection(self):
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
-    
-    def get_unreviewed_candidates(self, limit: int = 20) -> List[Dict]:
-        with self.get_connection() as conn:
-            cursor = conn.execute("""
-                SELECT * FROM email_candidates 
-                WHERE reviewed = 0 
-                ORDER BY confidence_score DESC, msg_date DESC
-                LIMIT ?
-            """, (limit,))
-            return [dict(row) for row in cursor.fetchall()]
-    
-    def insert_review_decision(self, email_candidate_id: int, 
-                              message_id: str, 
-                              is_flight_confirmation: bool,
-                              notes: Optional[str] = None):
-        with self.get_connection() as conn:
-            conn.execute("""
-                INSERT INTO review_decisions 
-                (email_candidate_id, message_id, is_flight_confirmation, notes)
-                VALUES (?, ?, ?, ?)
-            """, (email_candidate_id, message_id, is_flight_confirmation, notes))
-    
-    def mark_as_reviewed(self, candidate_id: int):
-        with self.get_connection() as conn:
-            conn.execute("""
-                UPDATE email_candidates SET reviewed = 1 WHERE id = ?
-            """, (candidate_id,))
-    
-    def count_unreviewed(self) -> int:
-        with self.get_connection() as conn:
-            result = conn.execute(
-                "SELECT COUNT(*) FROM email_candidates WHERE reviewed = 0"
-            ).fetchone()
-            return result[0]
-    
-    def count_confirmed_flights(self) -> int:
-        with self.get_connection() as conn:
-            result = conn.execute("""
-                SELECT COUNT(*) FROM review_decisions 
-                WHERE is_flight_confirmation = 1
-            """).fetchone()
-            return result[0]
+interface EmailCandidate {
+  id: number;
+  message_id: string;
+  gmail_uid: string;
+  subject: string;
+  from_email: string;
+  msg_date: string;
+  preview_text: string;
+  html_content: string;
+  plain_text: string;
+  confidence_score: number;
+  detection_reasons: string;
+  fetched_at: string;
+  reviewed: number;
+}
+
+interface ReviewDecision {
+  id: number;
+  email_candidate_id: number;
+  message_id: string;
+  is_flight_confirmation: number;
+  reviewed_at: string;
+  notes?: string;
+}
+
+export class DatabaseManager {
+  private db: Database.Database;
+
+  constructor(dbPath: string) {
+    this.db = new Database(dbPath);
+    this.initDatabase();
+  }
+
+  private initDatabase(): void {
+    // Create tables (SQL from earlier section)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS email_candidates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id TEXT UNIQUE NOT NULL,
+        gmail_uid TEXT,
+        subject TEXT,
+        from_email TEXT,
+        msg_date TEXT,
+        preview_text TEXT,
+        html_content TEXT,
+        plain_text TEXT,
+        confidence_score INTEGER,
+        detection_reasons TEXT,
+        fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        reviewed BOOLEAN DEFAULT 0
+      );
+
+      CREATE TABLE IF NOT EXISTS review_decisions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email_candidate_id INTEGER NOT NULL,
+        message_id TEXT NOT NULL,
+        is_flight_confirmation BOOLEAN NOT NULL,
+        reviewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        notes TEXT,
+        FOREIGN KEY (email_candidate_id) REFERENCES email_candidates(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS confirmed_flights (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id TEXT UNIQUE NOT NULL,
+        gmail_uid TEXT,
+        subject TEXT,
+        forwarded_to_tripit BOOLEAN DEFAULT 0,
+        forwarded_at TIMESTAMP,
+        parse_status TEXT,
+        tripit_trip_id TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_candidates_reviewed ON email_candidates(reviewed);
+      CREATE INDEX IF NOT EXISTS idx_decisions_confirmation ON review_decisions(is_flight_confirmation);
+      CREATE INDEX IF NOT EXISTS idx_message_id ON email_candidates(message_id);
+    `);
+  }
+
+  async getUnreviewedCandidates(limit: number = 20): Promise<EmailCandidate[]> {
+    const stmt = this.db.prepare(`
+      SELECT * FROM email_candidates 
+      WHERE reviewed = 0 
+      ORDER BY confidence_score DESC, msg_date DESC
+      LIMIT ?
+    `);
+    return stmt.all(limit) as EmailCandidate[];
+  }
+
+  async insertReviewDecision(
+    emailCandidateId: number,
+    messageId: string,
+    isFlightConfirmation: boolean,
+    notes?: string
+  ): Promise<void> {
+    const stmt = this.db.prepare(`
+      INSERT INTO review_decisions 
+      (email_candidate_id, message_id, is_flight_confirmation, notes)
+      VALUES (?, ?, ?, ?)
+    `);
+    stmt.run(emailCandidateId, messageId, isFlightConfirmation ? 1 : 0, notes);
+  }
+
+  async markAsReviewed(candidateId: number): Promise<void> {
+    const stmt = this.db.prepare('UPDATE email_candidates SET reviewed = 1 WHERE id = ?');
+    stmt.run(candidateId);
+  }
+
+  async countUnreviewed(): Promise<number> {
+    const stmt = this.db.prepare('SELECT COUNT(*) as count FROM email_candidates WHERE reviewed = 0');
+    const result = stmt.get() as { count: number };
+    return result.count;
+  }
+
+  async countConfirmedFlights(): Promise<number> {
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) as count FROM review_decisions 
+      WHERE is_flight_confirmation = 1
+    `);
+    const result = stmt.get() as { count: number };
+    return result.count;
+  }
+
+  async getCandidateByMessageId(messageId: string): Promise<EmailCandidate | undefined> {
+    const stmt = this.db.prepare('SELECT * FROM email_candidates WHERE message_id = ?');
+    return stmt.get(messageId) as EmailCandidate | undefined;
+  }
+
+  async insertConfirmedFlight(messageId: string, gmailUid: string, subject: string): Promise<void> {
+    const stmt = this.db.prepare(`
+      INSERT INTO confirmed_flights (message_id, gmail_uid, subject)
+      VALUES (?, ?, ?)
+    `);
+    stmt.run(messageId, gmailUid, subject);
+  }
+
+  async insertCandidates(candidates: Omit<EmailCandidate, 'id' | 'fetched_at' | 'reviewed'>[]): Promise<void> {
+    const stmt = this.db.prepare(`
+      INSERT OR IGNORE INTO email_candidates 
+      (message_id, gmail_uid, subject, from_email, msg_date, html_content, plain_text, 
+       confidence_score, detection_reasons)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const insert = this.db.transaction((candidates) => {
+      for (const c of candidates) {
+        stmt.run(
+          c.message_id, c.gmail_uid, c.subject, c.from_email, c.msg_date,
+          c.html_content, c.plain_text, c.confidence_score, c.detection_reasons
+        );
+      }
+    });
+
+    insert(candidates);
+  }
+}
 ```
 
 **Performance optimization with batch pre-loading and caching:**
 
-```python
-# Pre-load next batch while user reviews current batch
-from concurrent.futures import ThreadPoolExecutor
+```typescript
+import { DatabaseManager } from './database';
 
-class EmailBatchLoader:
-    def __init__(self, db: DatabaseManager, batch_size: int = 20):
-        self.db = db
-        self.batch_size = batch_size
-        self.cache = []
-        self.executor = ThreadPoolExecutor(max_workers=2)
-    
-    async def get_next_batch(self) -> List[Dict]:
-        if len(self.cache) < self.batch_size:
-            # Pre-load next batch in background
-            self.executor.submit(self._load_batch)
-        
-        # Return current cache and clear
-        batch = self.cache[:self.batch_size]
-        self.cache = self.cache[self.batch_size:]
-        return batch
-    
-    def _load_batch(self):
-        new_emails = self.db.get_unreviewed_candidates(self.batch_size * 2)
-        self.cache.extend(new_emails)
+interface EmailBatch {
+  emails: any[];
+}
+
+export class EmailBatchLoader {
+  private cache: any[] = [];
+  private batchSize: number;
+  private db: DatabaseManager;
+
+  constructor(db: DatabaseManager, batchSize: number = 20) {
+    this.db = db;
+    this.batchSize = batchSize;
+  }
+
+  async getNextBatch(): Promise<any[]> {
+    if (this.cache.length < this.batchSize) {
+      // Pre-load next batch in background
+      this.loadBatch();
+    }
+
+    // Return current cache and clear
+    const batch = this.cache.slice(0, this.batchSize);
+    this.cache = this.cache.slice(this.batchSize);
+    return batch;
+  }
+
+  private async loadBatch(): Promise<void> {
+    const newEmails = await this.db.getUnreviewedCandidates(this.batchSize * 2);
+    this.cache.push(...newEmails);
+  }
+}
 ```
 
 This ensures zero perceived load time between batches during review.
