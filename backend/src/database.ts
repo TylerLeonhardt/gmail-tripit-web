@@ -2,7 +2,6 @@ import Database from 'better-sqlite3';
 import {
   EmailCandidate,
   ReviewDecisionRecord,
-  ConfirmedFlight,
   Stats,
 } from './types';
 

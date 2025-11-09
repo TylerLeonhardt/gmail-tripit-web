@@ -1,5 +1,4 @@
 import { DatabaseManager } from './database';
-import { EmailCandidate } from './types';
 import * as fs from 'fs';
 import * as path from 'path';
 
